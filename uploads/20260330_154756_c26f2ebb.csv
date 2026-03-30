@@ -1,0 +1,5 @@
+Name,Age,Salary,Department
+    Alice,25,50000,IT
+    Bob,,60000,HR
+    Charlie,35,,IT
+    Alice,25,50000,IT

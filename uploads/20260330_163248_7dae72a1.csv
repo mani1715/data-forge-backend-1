@@ -1,0 +1,11 @@
+Name,Age,Salary,Department,Date
+John Doe,25,50000,Engineering,2024-01-15
+Jane Smith,,65000,Marketing,2024-02-20
+Bob Wilson,35,55000,Engineering,13-13-2023
+Alice Brown,28,,Sales,2024-03-10
+John Doe,25,50000,Engineering,2024-01-15
+Charlie Davis,-5,75000,Marketing,2024-04-01
+Eva Martinez,32,60000,,2024-05-15
+Frank Lee,40,80000,Engineering,
+Grace Kim,45,90000,HR,2024-06-20
+,38,70000,Sales,2024-07-25

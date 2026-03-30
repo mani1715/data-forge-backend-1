@@ -1,0 +1,9 @@
+Name,Age,Salary,Department,Date_Joined,Product_Name,Order_ID,Quantity
+Alice,25.0,50000.0,IT,2020-01-15,Laptop,ORD 1,2.0
+Bob,,60000.0,HR,2019-05-20,Mouse,,1.0
+,35.0,,IT,,,ORD 3,
+David,28.0,75000.0,,13-13-2023,Keyboard,ORD 4,3.0
+Alice,25.0,50000.0,IT,2020-01-15,Laptop,ORD 1,2.0
+Eve,32.0,80000.0,Finance,2021-03-10,Monitor,ORD 6,1.0
+??,45.0,90000.0,Unknown,2022-07-01,??,Unknown,0.0
+Frank,-5.0,1000000.0,IT,2023-12-01,Headphones,ORD 8,-1.0
