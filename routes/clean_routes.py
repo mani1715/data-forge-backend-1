@@ -9,8 +9,14 @@ load_dotenv()
 
 clean_bp = Blueprint('clean', __name__)
 
-@clean_bp.route('/action', methods=['POST'])
+@clean_bp.route('/action', methods=['POST', 'OPTIONS'])
 def perform_action():
+    print("ACTION API HIT")
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        return '', 200
+    
     df = get_current_df()
     
     if df is None:

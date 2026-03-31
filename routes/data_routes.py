@@ -24,9 +24,16 @@ def set_current_df(df):
     global CURRENT_DF
     CURRENT_DF = df
 
-@data_bp.route('/upload', methods=['POST'])
+@data_bp.route('/upload', methods=['POST', 'OPTIONS'])
 def upload_file():
     global CURRENT_DF, CURRENT_FILE_PATH
+    
+    print("UPLOAD API HIT")
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        print("OPTIONS preflight request received")
+        return '', 200
     
     print(f"Upload request size: {request.content_length} bytes")
     
@@ -121,8 +128,13 @@ def upload_file():
         return jsonify({'error': f'Error processing file: {str(e)}'}), 500
 
 
-@data_bp.route('/download', methods=['GET'])
+@data_bp.route('/download', methods=['GET', 'OPTIONS'])
 def download_file():
+    print("DOWNLOAD API HIT")
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        return '', 200
     global CURRENT_DF
     
     if CURRENT_DF is None:
@@ -147,10 +159,16 @@ def download_file():
         return jsonify({'error': f'Download failed: {str(e)}'}), 500
 
 
-@data_bp.route('/cleanup', methods=['POST'])
+@data_bp.route('/cleanup', methods=['POST', 'OPTIONS'])
 def cleanup():
     """Clean up uploaded files"""
     global CURRENT_FILE_PATH
+    
+    print("CLEANUP API HIT")
+    
+    # Handle CORS preflight request
+    if request.method == 'OPTIONS':
+        return '', 200
     
     try:
         if CURRENT_FILE_PATH and os.path.exists(CURRENT_FILE_PATH):

@@ -19,7 +19,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Enable CORS for all origins (for Railway deployment)
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}}, supports_credentials=True)
 
 # Register the Routes with /api prefix
 app.register_blueprint(data_bp, url_prefix='/api')

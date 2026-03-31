@@ -23,7 +23,7 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dataforge-secret-key-20
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Enable CORS for all origins
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}}, supports_credentials=True)
 
 # Register the Routes with /api prefix
 app.register_blueprint(data_bp, url_prefix='/api')
