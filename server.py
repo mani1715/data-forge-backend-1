@@ -10,6 +10,7 @@ import io
 import os
 import uuid
 from datetime import datetime
+import re
 
 # Create FastAPI app
 app = FastAPI()
@@ -27,6 +28,145 @@ app.add_middleware(
 CURRENT_DF = None
 UPLOAD_FOLDER = "/tmp/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
+def clean_order_id(value):
+    """Format order ID as 'ORD X' or return 0 if missing"""
+    if pd.isna(value) or value is None:
+        return 0
+    
+    str_val = str(value).strip()
+    
+    # Check for missing indicators
+    if str_val.lower() in ['', 'nan', 'none', 'null', 'unknown', '??', '?', 'missing']:
+        return 0
+    
+    # Already formatted as ORD X
+    if str_val.upper().startswith('ORD'):
+        # Extract number and reformat
+        num_part = re.sub(r'[^0-9]', '', str_val)
+        if num_part and int(num_part) > 0:
+            return f"ORD {int(num_part)}"
+        return 0
+    
+    # Try to get numeric value
+    try:
+        num = int(float(str_val))
+        if num > 0:
+            return f"ORD {num}"
+        return 0
+    except:
+        return 0
+
+
+def clean_numeric(value, allow_negative=False):
+    """Convert to integer, return 0 if missing/invalid"""
+    if pd.isna(value) or value is None:
+        return 0
+    
+    str_val = str(value).strip()
+    
+    if str_val.lower() in ['', 'nan', 'none', 'null', 'unknown', '??', '?', 'missing']:
+        return 0
+    
+    try:
+        num = float(str_val)
+        if not allow_negative and num < 0:
+            return 0
+        # Return as integer if whole number, else keep decimal
+        if num == int(num):
+            return int(num)
+        return round(num, 2)
+    except:
+        return 0
+
+
+def clean_date(value):
+    """Validate date, return 00-00-0000 if invalid"""
+    if pd.isna(value) or value is None:
+        return "00-00-0000"
+    
+    str_val = str(value).strip()
+    
+    if str_val.lower() in ['', 'nan', 'none', 'null', 'unknown', '??', '?', 'missing']:
+        return "00-00-0000"
+    
+    # Already placeholder
+    if str_val in ['00-00-0000', '0000-00-00', '00/00/0000']:
+        return "00-00-0000"
+    
+    # Try to parse and validate date
+    try:
+        # Replace / with - for consistency
+        normalized = str_val.replace('/', '-')
+        parts = normalized.split('-')
+        
+        if len(parts) == 3:
+            # Determine format
+            if len(parts[0]) == 4:  # YYYY-MM-DD
+                year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+            else:  # DD-MM-YYYY or MM-DD-YYYY (assume DD-MM-YYYY)
+                day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+            
+            # Validate month and day
+            if month < 1 or month > 12:
+                return "00-00-0000"
+            if day < 1 or day > 31:
+                return "00-00-0000"
+            
+            # Return original format if valid
+            return str_val
+        
+        return "00-00-0000"
+    except:
+        return "00-00-0000"
+
+
+def clean_text(value):
+    """Clean text values, replace ?? and missing with Unknown"""
+    if pd.isna(value) or value is None:
+        return "Unknown"
+    
+    str_val = str(value).strip()
+    
+    if str_val.lower() in ['', 'nan', 'none', 'null', '??', '?', 'missing']:
+        return "Unknown"
+    
+    return str_val
+
+
+def process_dataframe(df):
+    """Process entire dataframe with proper cleaning rules"""
+    df_clean = df.copy()
+    
+    for col in df_clean.columns:
+        col_lower = col.lower()
+        
+        # Order ID columns
+        if 'order' in col_lower or (col_lower == 'id' and 'order' in df_clean.columns[0].lower()):
+            df_clean[col] = df_clean[col].apply(clean_order_id)
+        
+        # Date columns
+        elif 'date' in col_lower or 'dob' in col_lower or 'birth' in col_lower:
+            df_clean[col] = df_clean[col].apply(clean_date)
+        
+        # Price columns (allow decimals)
+        elif 'price' in col_lower or 'cost' in col_lower or 'amount' in col_lower or 'total' in col_lower:
+            df_clean[col] = df_clean[col].apply(lambda x: clean_numeric(x, allow_negative=False))
+        
+        # Quantity columns (integers only, no negatives)
+        elif 'quantity' in col_lower or 'qty' in col_lower or 'count' in col_lower:
+            df_clean[col] = df_clean[col].apply(lambda x: clean_numeric(x, allow_negative=False))
+        
+        # Other numeric columns
+        elif df_clean[col].dtype in ['int64', 'int32', 'float64', 'float32']:
+            df_clean[col] = df_clean[col].apply(lambda x: clean_numeric(x, allow_negative=True))
+        
+        # Text columns
+        elif df_clean[col].dtype == 'object':
+            df_clean[col] = df_clean[col].apply(clean_text)
+    
+    return df_clean
 
 
 @app.get("/")
@@ -73,28 +213,11 @@ async def upload_file(file: UploadFile = File(...)):
         else:
             return JSONResponse(status_code=400, content={"detail": "Use CSV or XLSX"})
         
-        # Clean up file
+        # Clean up temp file
         os.remove(file_path)
         
-        # Process columns based on type
-        for col in df.columns:
-            col_lower = col.lower()
-            
-            # Date columns - fill with 00-00-0000
-            if 'date' in col_lower or 'dob' in col_lower or 'birth' in col_lower:
-                df[col] = df[col].fillna("00-00-0000")
-                df[col] = df[col].replace(['nan', 'NaN', 'None', '', 'Unknown'], "00-00-0000")
-            
-            # Numeric columns - fill with 0
-            elif df[col].dtype in ['int64', 'int32', 'float64', 'float32'] or \
-                 col_lower in ['price', 'amount', 'cost', 'total', 'quantity', 'qty', 
-                               'age', 'salary', 'revenue', 'count', 'number', 'id']:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            
-            # Text columns - fill with Unknown
-            elif df[col].dtype == 'object':
-                df[col] = df[col].fillna("Unknown")
-                df[col] = df[col].replace(['nan', 'NaN', 'None', ''], "Unknown")
+        # Process and clean the dataframe
+        df = process_dataframe(df)
         
         CURRENT_DF = df
         
@@ -123,19 +246,8 @@ async def upload_file(file: UploadFile = File(...)):
         if cat_cols > 0:
             type_data.append({"name": "Categorical", "value": cat_cols})
         
-        # Preview - convert to JSON-safe
-        preview = []
-        for _, row in df.head(20).iterrows():
-            row_dict = {}
-            for col in df.columns:
-                val = row[col]
-                if pd.isna(val):
-                    row_dict[col] = None
-                elif isinstance(val, (np.integer, np.floating)):
-                    row_dict[col] = float(val) if np.isfinite(val) else None
-                else:
-                    row_dict[col] = str(val)
-            preview.append(row_dict)
+        # Build preview
+        preview = build_preview(df)
         
         return {
             "message": "File uploaded successfully",
@@ -156,6 +268,29 @@ async def upload_file(file: UploadFile = File(...)):
         
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+def build_preview(df):
+    """Convert dataframe to JSON-safe preview"""
+    preview = []
+    for _, row in df.head(20).iterrows():
+        row_dict = {}
+        for col in df.columns:
+            val = row[col]
+            if pd.isna(val):
+                row_dict[col] = None
+            elif isinstance(val, (np.integer)):
+                row_dict[col] = int(val)
+            elif isinstance(val, (np.floating)):
+                # Convert to int if whole number
+                if val == int(val):
+                    row_dict[col] = int(val)
+                else:
+                    row_dict[col] = round(float(val), 2)
+            else:
+                row_dict[col] = str(val)
+        preview.append(row_dict)
+    return preview
 
 
 @app.options("/api/action")
@@ -188,7 +323,8 @@ async def perform_action(request: Request):
         if action == "remove_duplicates":
             before = len(df)
             df = df.drop_duplicates()
-            message = f"Removed {before - len(df)} duplicates"
+            removed = before - len(df)
+            message = f"AI Analysis: Identified and removed {removed} duplicate rows. Data integrity preserved."
             
         elif action == "fill_missing":
             numeric_cols = df.select_dtypes(include=[np.number]).columns
@@ -198,9 +334,11 @@ async def perform_action(request: Request):
                 missing = df[col].isnull().sum()
                 if missing > 0:
                     if strategy == "mean":
-                        df[col] = df[col].fillna(df[col].mean())
+                        fill_val = df[col].mean()
+                        df[col] = df[col].fillna(fill_val)
                     elif strategy == "median":
-                        df[col] = df[col].fillna(df[col].median())
+                        fill_val = df[col].median()
+                        df[col] = df[col].fillna(fill_val)
                     elif strategy == "mode":
                         mode = df[col].mode()
                         if len(mode) > 0:
@@ -209,7 +347,12 @@ async def perform_action(request: Request):
                         df[col] = df[col].fillna(0)
                     filled += missing
             
-            message = f"Filled {filled} missing values with {strategy}"
+            # Convert to integers where appropriate
+            for col in numeric_cols:
+                if df[col].apply(lambda x: x == int(x) if pd.notna(x) else True).all():
+                    df[col] = df[col].astype(int)
+            
+            message = f"AI Analysis: Filled {filled} missing values using {strategy} strategy."
             
         elif action == "remove_outliers":
             before = len(df)
@@ -222,14 +365,23 @@ async def perform_action(request: Request):
                 if IQR > 0:
                     df = df[(df[col] >= Q1 - 1.5*IQR) & (df[col] <= Q3 + 1.5*IQR)]
             
-            message = f"Removed {before - len(df)} outliers"
+            removed = before - len(df)
+            message = f"AI Analysis: Detected and removed {removed} statistical outliers using IQR method."
             
         elif action == "clean_text":
+            cleaned = 0
             for col in df.select_dtypes(include=['object']).columns:
-                df[col] = df[col].fillna("Unknown")
-            message = "Cleaned text columns"
+                # Replace ??, ?, and other invalid values
+                mask = df[col].isin(['??', '?', '', 'nan', 'NaN', 'None', 'null'])
+                cleaned += mask.sum()
+                df[col] = df[col].replace(['??', '?', '', 'nan', 'NaN', 'None', 'null'], 'Unknown')
+                df[col] = df[col].fillna('Unknown')
+            message = f"AI Analysis: Cleaned {cleaned} invalid text entries and standardized formatting."
         else:
             return {"success": False, "error": f"Unknown action: {action}"}
+        
+        # Re-process to ensure clean formatting
+        df = process_dataframe(df)
         
         # Update and recalculate
         CURRENT_DF = df
@@ -241,19 +393,7 @@ async def perform_action(request: Request):
         dup_pct = (duplicates / len(df) * 100) if len(df) > 0 else 0
         score = round(max(0, 100 - missing_pct - dup_pct), 2)
         
-        # Preview
-        preview = []
-        for _, row in df.head(20).iterrows():
-            row_dict = {}
-            for col in df.columns:
-                val = row[col]
-                if pd.isna(val):
-                    row_dict[col] = None
-                elif isinstance(val, (np.integer, np.floating)):
-                    row_dict[col] = float(val) if np.isfinite(val) else None
-                else:
-                    row_dict[col] = str(val)
-            preview.append(row_dict)
+        preview = build_preview(df)
         
         return {
             "success": True,
