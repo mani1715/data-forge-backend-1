@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
@@ -37,9 +37,23 @@ def index():
 def health():
     return {"status": "healthy"}
 
+@app.route('/api/test-post', methods=['POST', 'GET'])
+def test_post():
+    """Test endpoint to verify POST method works"""
+    print(f"TEST-POST HIT with method: {request.method}")
+    return {"status": "ok", "method": request.method, "message": "POST is working!"}
+
 @app.errorhandler(413)
 def too_large(e):
     return {"error": "File too large. Max 500MB allowed."}, 413
+
+# Debug: Print all registered routes on startup
+def print_routes():
+    print("\n📋 REGISTERED ROUTES:")
+    for rule in app.url_map.iter_rules():
+        methods = ','.join(sorted(rule.methods - {'HEAD', 'OPTIONS'}))
+        print(f"  {rule.endpoint:30s} {methods:20s} {rule.rule}")
+    print("")
 
 # For local development and production deployment
 if __name__ == '__main__':
@@ -48,4 +62,8 @@ if __name__ == '__main__':
     print(f"\n🚀 DataForge API starting on http://localhost:{port}")
     print(f"📊 Health check: http://localhost:{port}/health")
     print(f"📁 Upload endpoint: http://localhost:{port}/api/upload\n")
+    print_routes()
     app.run(debug=debug, host='0.0.0.0', port=port, threaded=True)
+else:
+    # For gunicorn/production - print routes on import
+    print_routes()
