@@ -76,9 +76,25 @@ async def upload_file(file: UploadFile = File(...)):
         # Clean up file
         os.remove(file_path)
         
-        # Fill NaN for text columns
-        for col in df.select_dtypes(include=['object']).columns:
-            df[col] = df[col].fillna("Unknown")
+        # Process columns based on type
+        for col in df.columns:
+            col_lower = col.lower()
+            
+            # Date columns - fill with 00-00-0000
+            if 'date' in col_lower or 'dob' in col_lower or 'birth' in col_lower:
+                df[col] = df[col].fillna("00-00-0000")
+                df[col] = df[col].replace(['nan', 'NaN', 'None', '', 'Unknown'], "00-00-0000")
+            
+            # Numeric columns - fill with 0
+            elif df[col].dtype in ['int64', 'int32', 'float64', 'float32'] or \
+                 col_lower in ['price', 'amount', 'cost', 'total', 'quantity', 'qty', 
+                               'age', 'salary', 'revenue', 'count', 'number', 'id']:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+            # Text columns - fill with Unknown
+            elif df[col].dtype == 'object':
+                df[col] = df[col].fillna("Unknown")
+                df[col] = df[col].replace(['nan', 'NaN', 'None', ''], "Unknown")
         
         CURRENT_DF = df
         
@@ -259,10 +275,16 @@ def download_file():
     CURRENT_DF.to_csv(output, index=False)
     output.seek(0)
     
+    headers = {
+        "Content-Disposition": "attachment; filename=cleaned_data.csv",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Disposition"
+    }
+    
     return StreamingResponse(
         output,
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=cleaned_data.csv"}
+        headers=headers
     )
 
 
