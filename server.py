@@ -23,13 +23,23 @@ from services.ai_engine import AIEngine
 # Create FastAPI app
 app = FastAPI(title="DataForge API", version="1.0.0")
 
-# Configure CORS
+# Configure CORS - Allow all origins for Railway deployment
+origins = [
+    "https://data-forge-frontend-production-06e0.up.railway.app",
+    "https://web-production-169b9.up.railway.app",
+    "http://localhost:3000",
+    "http://localhost:8001",
+    "*"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 # In-memory storage
