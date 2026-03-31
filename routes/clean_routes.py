@@ -24,7 +24,7 @@ def perform_action():
             'error': 'No data uploaded',
             'message': 'Please upload a file first before performing actions',
             'success': False
-        }), 200  # Return 200 with error message instead of 400
+        }), 200
     
     # Safely parse JSON data
     data = request.json or {}
@@ -40,7 +40,6 @@ def perform_action():
         }), 200
     
     # Strategy defaults based on action type
-    # Only 'fill_missing' requires strategy, others ignore it
     default_strategies = {
         'fill_missing': 'ai',
         'remove_duplicates': None,
@@ -49,12 +48,16 @@ def perform_action():
     }
     
     strategy = data.get('strategy') or default_strategies.get(action, 'ai')
-    fill_value = data.get('fill_value')  # Optional, only used for fill_missing with 'constant' strategy
+    fill_value = data.get('fill_value')
     
     cleaned_df = df.copy()
     message = "No action performed"
 
     try:
+        # Get initial stats for comparison
+        initial_rows = len(df)
+        initial_missing = df.isnull().sum().sum()
+        
         if action == 'remove_duplicates':
             cleaned_df, message = AIEngine.remove_duplicates(cleaned_df)
 
@@ -75,23 +78,71 @@ def perform_action():
                 'success': False
             }), 200
 
-        # Custom rules are already applied inside each AIEngine method
-        # DO NOT call apply_custom_rules again here to avoid double formatting
-        
+        # Update the stored dataframe
         set_current_df(cleaned_df)
+        
+        # Calculate new stats
         new_score = DataProfiler.calculate_quality_score(cleaned_df)
+        new_summary = DataProfiler.get_summary(cleaned_df)
+        new_chart_data = DataProfiler.get_chart_data(cleaned_df)
+        
+        # Calculate changes for feedback
+        rows_changed = initial_rows - len(cleaned_df)
+        missing_changed = initial_missing - cleaned_df.isnull().sum().sum()
 
         return jsonify({
             'success': True,
             'message': message,
             'new_score': new_score,
-            'preview': cleaned_df.head(20).to_dict(orient='records')
+            'summary': new_summary,
+            'chart_data': new_chart_data,
+            'preview': cleaned_df.head(20).to_dict(orient='records'),
+            'changes': {
+                'rows_removed': rows_changed,
+                'missing_filled': int(missing_changed)
+            }
         }), 200
 
     except Exception as e:
         print(f"Action error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
             'error': str(e),
             'message': f"Failed to perform action '{action}'",
             'success': False
-        }), 200  # Return 200 with error details instead of 500
+        }), 200
+
+
+@clean_bp.route('/stats', methods=['GET', 'OPTIONS'])
+def get_stats():
+    """Get current dataset statistics"""
+    print("STATS API HIT")
+    
+    if request.method == 'OPTIONS':
+        return '', 200
+    
+    df = get_current_df()
+    
+    if df is None:
+        return jsonify({
+            'error': 'No data uploaded',
+            'success': False
+        }), 200
+    
+    try:
+        score = DataProfiler.calculate_quality_score(df)
+        summary = DataProfiler.get_summary(df)
+        chart_data = DataProfiler.get_chart_data(df)
+        
+        return jsonify({
+            'success': True,
+            'score': score,
+            'summary': summary,
+            'chart_data': chart_data
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'success': False
+        }), 200
