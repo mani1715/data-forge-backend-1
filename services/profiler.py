@@ -81,11 +81,15 @@ class DataProfiler:
     def get_summary(df):
         """
         Returns a dictionary of basic stats.
+        Uses same logic as quality score for consistency.
         """
+        # Count true missing values (nulls only for summary)
+        true_missing = int(df.isnull().sum().sum())
+        
         summary = {
             'rows': len(df),
             'columns': len(df.columns),
-            'missing_values': int(df.isnull().sum().sum()),
+            'missing_values': true_missing,
             'duplicates': int(df.duplicated().sum()),
             'column_types': df.dtypes.astype(str).to_dict()
         }

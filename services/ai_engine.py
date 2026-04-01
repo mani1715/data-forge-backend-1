@@ -242,7 +242,7 @@ class AIEngine:
     @staticmethod
     def clean_missing_values(df, strategy='ai', fill_value=None):
         """
-        Clean missing values with proper strategy handling.
+        Clean ALL missing values - both numeric and text columns.
         Each strategy is now properly implemented.
         """
         df_clean = df.copy()
@@ -251,6 +251,9 @@ class AIEngine:
         numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
         exclude_cols = ['order', 'id', 'order_id', 'order_number']
         numeric_cols = [col for col in numeric_cols if col.lower() not in exclude_cols]
+        
+        # Get text/categorical columns
+        text_cols = df_clean.select_dtypes(include=['object']).columns.tolist()
         
         # Count initial missing values
         initial_missing = df_clean.isnull().sum().sum()
@@ -279,40 +282,37 @@ class AIEngine:
                         imputer = IterativeImputer(random_state=42, max_iter=10)
                         df_clean[cols_with_missing] = imputer.fit_transform(df_clean[cols_with_missing])
                         filled_count = initial_missing - df_clean.isnull().sum().sum()
-                        message = f"AI Analysis: {ai_analysis[:150]}... Filled {filled_count} missing values using MICE algorithm."
+                        message = f"AI Analysis: {ai_analysis[:150]}... "
                     except Exception as e:
                         # Fallback to mean if MICE fails
                         df_clean[numeric_cols] = df_clean[numeric_cols].fillna(df_clean[numeric_cols].mean())
                         filled_count = initial_missing - df_clean.isnull().sum().sum()
-                        message = f"Filled {filled_count} missing values using mean (AI fallback)."
+                        message = "Used mean (AI fallback). "
                     
                 elif strategy == 'mean':
-                    # Calculate mean for each column and fill
                     for col in cols_with_missing:
                         col_mean = df_clean[col].mean()
                         missing_count = df_clean[col].isnull().sum()
                         df_clean[col] = df_clean[col].fillna(col_mean)
                         filled_count += missing_count
-                    message = f"Filled {filled_count} missing values with column means."
+                    message = f"Filled numeric with means. "
                     
                 elif strategy == 'median':
-                    # Calculate median for each column and fill
                     for col in cols_with_missing:
                         col_median = df_clean[col].median()
                         missing_count = df_clean[col].isnull().sum()
                         df_clean[col] = df_clean[col].fillna(col_median)
                         filled_count += missing_count
-                    message = f"Filled {filled_count} missing values with column medians."
+                    message = f"Filled numeric with medians. "
                 
                 elif strategy == 'mode':
-                    # Calculate mode for each column and fill
                     for col in cols_with_missing:
                         mode_val = df_clean[col].mode()
                         missing_count = df_clean[col].isnull().sum()
                         if not mode_val.empty:
                             df_clean[col] = df_clean[col].fillna(mode_val.iloc[0])
                             filled_count += missing_count
-                    message = f"Filled {filled_count} missing values with column modes."
+                    message = f"Filled numeric with modes. "
 
                 elif strategy == 'constant':
                     val = fill_value if fill_value is not None else 0
@@ -320,11 +320,35 @@ class AIEngine:
                         missing_count = df_clean[col].isnull().sum()
                         df_clean[col] = df_clean[col].fillna(val)
                         filled_count += missing_count
-                    message = f"Filled {filled_count} missing values with constant value: {val}."
-            else:
-                message = "No missing numeric values found to clean."
-        else:
-            message = "No numeric columns found to clean."
+                    message = f"Filled numeric with constant: {val}. "
+        
+        # ALSO fill text/categorical columns with missing values
+        text_filled = 0
+        for col in text_cols:
+            missing_count = df_clean[col].isnull().sum()
+            if missing_count > 0:
+                if strategy == 'mode':
+                    mode_val = df_clean[col].mode()
+                    if not mode_val.empty:
+                        df_clean[col] = df_clean[col].fillna(mode_val.iloc[0])
+                    else:
+                        df_clean[col] = df_clean[col].fillna('Unknown')
+                elif strategy == 'constant' and fill_value is not None:
+                    df_clean[col] = df_clean[col].fillna(str(fill_value))
+                else:
+                    df_clean[col] = df_clean[col].fillna('Unknown')
+                text_filled += missing_count
+        
+        filled_count += text_filled
+        
+        # Calculate final missing count
+        final_missing = df_clean.isnull().sum().sum()
+        
+        if filled_count > 0:
+            message += f"Filled {int(filled_count)} total missing values ({int(filled_count - text_filled)} numeric, {text_filled} text). "
+        
+        if final_missing == 0:
+            message += "All missing values have been filled!"
         
         # Apply custom rules after cleaning
         df_clean = AIEngine.apply_custom_rules(df_clean)
