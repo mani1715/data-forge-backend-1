@@ -1,6 +1,6 @@
 """
 DataForge Backend - Minimal FastAPI Server for Railway
-Fixed: Quantity shows numbers, all buttons work correctly
+Fixed: Remove special characters (#, !!, etc.), proper Order IDs
 """
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +30,25 @@ UPLOAD_FOLDER = "/tmp/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
+def clean_text_value(value):
+    """Remove special characters like #, !, !!, etc. from text"""
+    if pd.isna(value) or value is None:
+        return None
+    
+    str_val = str(value).strip()
+    
+    # Remove special characters at the end or throughout
+    # Keep only letters, numbers, spaces, and basic punctuation
+    cleaned = re.sub(r'[#!@$%^&*]+', '', str_val)
+    cleaned = cleaned.strip()
+    
+    # Capitalize first letter
+    if cleaned:
+        cleaned = cleaned[0].upper() + cleaned[1:] if len(cleaned) > 1 else cleaned.upper()
+    
+    return cleaned if cleaned else None
+
+
 def is_missing_text(value):
     """Check if text value is missing"""
     if pd.isna(value) or value is None:
@@ -39,12 +58,12 @@ def is_missing_text(value):
 
 
 def is_missing_number(value):
-    """Check if numeric value is missing (NaN or 0 placeholder)"""
+    """Check if numeric value is missing"""
     if pd.isna(value) or value is None:
         return True
     try:
         num = float(value)
-        return num == 0 or num < 0
+        return num <= 0
     except:
         return True
 
@@ -78,13 +97,13 @@ def is_missing_order(value):
     if pd.isna(value) or value is None:
         return True
     str_val = str(value).strip().lower()
-    if str_val in ['', 'nan', 'none', 'null', 'unknown', '??', '?', '0', '0.0']:
+    if str_val in ['', 'nan', 'none', 'null', 'unknown', '??', '?', '0', '0.0', 'ord 0', 'ord0']:
         return True
     return False
 
 
 def calculate_quality_score(df):
-    """Calculate quality score - 100% means NO missing values"""
+    """Calculate quality score"""
     if df.empty:
         return 0.0
     
@@ -102,7 +121,7 @@ def calculate_quality_score(df):
             elif 'date' in col_lower or 'dob' in col_lower:
                 if is_missing_date(val):
                     missing_count += 1
-            elif col_lower in ['price', 'quantity', 'qty', 'amount', 'cost', 'total', 'age', 'salary']:
+            elif col_lower in ['price', 'quantity', 'qty', 'amount', 'cost', 'total']:
                 if is_missing_number(val):
                     missing_count += 1
             elif df[col].dtype == 'object':
@@ -120,48 +139,61 @@ def calculate_quality_score(df):
 
 
 def fill_order_ids(series):
-    """Fill missing order IDs with sequential ORD numbers"""
-    max_num = 0
+    """Fill and fix order IDs - sequential starting from 1"""
+    result = []
+    next_num = 1
+    
+    # First pass - find existing valid order numbers
+    existing_nums = set()
     for val in series:
         if not is_missing_order(val):
             nums = re.findall(r'\d+', str(val))
             if nums:
-                max_num = max(max_num, max(int(n) for n in nums))
+                num = int(nums[0])
+                if num > 0:
+                    existing_nums.add(num)
     
-    result = []
-    next_num = max_num + 1
+    # Assign order IDs
     for val in series:
         if is_missing_order(val):
+            # Find next available number
+            while next_num in existing_nums:
+                next_num += 1
             result.append(f"ORD {next_num}")
+            existing_nums.add(next_num)
             next_num += 1
         else:
             nums = re.findall(r'\d+', str(val))
             if nums:
-                result.append(f"ORD {nums[0]}")
+                num = int(nums[0])
+                if num > 0:
+                    result.append(f"ORD {num}")
+                else:
+                    while next_num in existing_nums:
+                        next_num += 1
+                    result.append(f"ORD {next_num}")
+                    existing_nums.add(next_num)
+                    next_num += 1
             else:
+                while next_num in existing_nums:
+                    next_num += 1
                 result.append(f"ORD {next_num}")
+                existing_nums.add(next_num)
                 next_num += 1
+    
     return result
 
 
 def fill_dates(series):
-    """Fill missing dates with valid date"""
+    """Fill missing dates"""
     valid_dates = [str(v) for v in series if not is_missing_date(v)]
-    
-    if valid_dates:
-        fill_date = max(set(valid_dates), key=valid_dates.count)
-    else:
-        fill_date = "2024-01-15"
-    
+    fill_date = max(set(valid_dates), key=valid_dates.count) if valid_dates else "2024-01-15"
     return [fill_date if is_missing_date(v) else str(v) for v in series]
 
 
 def fill_numeric(series, strategy="mean"):
-    """Fill missing numeric values with calculated value"""
-    # Convert to numeric
+    """Fill missing numeric values"""
     numeric_series = pd.to_numeric(series, errors='coerce')
-    
-    # Get valid values (not NaN and > 0)
     valid_vals = numeric_series[(numeric_series.notna()) & (numeric_series > 0)]
     
     if len(valid_vals) > 0:
@@ -175,15 +207,13 @@ def fill_numeric(series, strategy="mean"):
         else:
             fill_val = valid_vals.mean()
         
-        # Round to integer if close to integer
         if abs(fill_val - round(fill_val)) < 0.01:
             fill_val = int(round(fill_val))
         else:
             fill_val = round(fill_val, 2)
     else:
-        fill_val = 1  # Default if no valid values
+        fill_val = 1
     
-    # Fill missing values
     result = []
     for val in series:
         if is_missing_number(val):
@@ -202,15 +232,36 @@ def fill_numeric(series, strategy="mean"):
 
 
 def fill_text(series):
-    """Fill missing text with mode"""
-    valid_vals = [str(v) for v in series if not is_missing_text(v)]
+    """Fill missing text and clean special characters"""
+    # First clean all values
+    cleaned_series = [clean_text_value(v) for v in series]
     
-    if valid_vals:
-        fill_val = max(set(valid_vals), key=valid_vals.count)
-    else:
-        fill_val = "Standard"
+    # Find valid values for mode
+    valid_vals = [v for v in cleaned_series if v and not is_missing_text(v)]
+    fill_val = max(set(valid_vals), key=valid_vals.count) if valid_vals else "Standard"
     
-    return [fill_val if is_missing_text(v) else str(v) for v in series]
+    result = []
+    for val in cleaned_series:
+        if val is None or is_missing_text(val):
+            result.append(fill_val)
+        else:
+            result.append(val)
+    
+    return result
+
+
+def clean_all_text_columns(df):
+    """Clean special characters from all text columns"""
+    df_clean = df.copy()
+    
+    for col in df_clean.columns:
+        if df_clean[col].dtype == 'object':
+            col_lower = col.lower()
+            # Skip order and date columns
+            if 'order' not in col_lower and 'date' not in col_lower and 'dob' not in col_lower:
+                df_clean[col] = df_clean[col].apply(clean_text_value)
+    
+    return df_clean
 
 
 def build_preview(df):
@@ -269,11 +320,15 @@ async def upload_file(file: UploadFile = File(...)):
             return JSONResponse(status_code=400, content={"detail": "Use CSV or XLSX"})
         
         os.remove(file_path)
+        
+        # Clean text columns on upload (remove #, !!, etc.)
+        df = clean_all_text_columns(df)
+        
         CURRENT_DF = df.copy()
         
         score = calculate_quality_score(df)
         
-        # Count missing per column
+        # Count missing
         missing_data = []
         total_missing = 0
         for col in df.columns:
@@ -368,13 +423,13 @@ async def perform_action(request: Request):
                     df[col] = fill_dates(df[col])
                     filled += before
                 
-                # Price, Quantity, Amount columns (NUMERIC)
-                elif col_lower in ['price', 'quantity', 'qty', 'amount', 'cost', 'total', 'age', 'salary', 'revenue']:
+                # Numeric columns
+                elif col_lower in ['price', 'quantity', 'qty', 'amount', 'cost', 'total', 'age', 'salary']:
                     before = sum(1 for v in df[col] if is_missing_number(v))
                     df[col] = fill_numeric(df[col], strategy)
                     filled += before
                 
-                # Other numeric columns
+                # Other numeric
                 elif df[col].dtype in ['int64', 'int32', 'float64', 'float32']:
                     numeric_vals = pd.to_numeric(df[col], errors='coerce')
                     before = numeric_vals.isna().sum()
@@ -382,12 +437,11 @@ async def perform_action(request: Request):
                         df[col] = fill_numeric(df[col], strategy)
                         filled += before
                 
-                # Text columns
+                # Text columns - also clean special characters
                 elif df[col].dtype == 'object':
                     before = sum(1 for v in df[col] if is_missing_text(v))
-                    if before > 0:
-                        df[col] = fill_text(df[col])
-                        filled += before
+                    df[col] = fill_text(df[col])
+                    filled += before
             
             message = f"AI Analysis: Filled {filled} missing values using {strategy}. All data complete."
         
@@ -414,11 +468,17 @@ async def perform_action(request: Request):
         elif action == "clean_text":
             cleaned = 0
             for col in df.select_dtypes(include=['object']).columns:
-                before = sum(1 for v in df[col] if is_missing_text(v))
-                df[col] = fill_text(df[col])
-                cleaned += before
+                col_lower = col.lower()
+                if 'order' not in col_lower and 'date' not in col_lower:
+                    before_vals = df[col].tolist()
+                    df[col] = fill_text(df[col])
+                    # Count how many changed
+                    after_vals = df[col].tolist()
+                    for b, a in zip(before_vals, after_vals):
+                        if str(b) != str(a):
+                            cleaned += 1
             
-            message = f"AI Analysis: Cleaned {cleaned} text entries."
+            message = f"AI Analysis: Cleaned {cleaned} text entries. Removed special characters."
         
         else:
             return {"success": False, "error": f"Unknown action: {action}"}
